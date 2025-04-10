@@ -14,10 +14,10 @@ def generate_point_cloud_from_stereo(imgL_path, imgR_path, focal_length=800, bas
 
     stereo = cv2.StereoSGBM_create(
         minDisparity=0,
-        numDisparities=16 * 5,
-        blockSize=5,
-        P1=8 * 3 * 5 ** 2,
-        P2=32 * 3 * 5 ** 2,
+        numDisparities=96,
+        blockSize=7,
+        P1=8 * 3 * 7 ** 2,
+        P2=32 * 3 * 7 ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=5,
         speckleWindowSize=50,
@@ -102,7 +102,31 @@ def generate_point_cloud_from_depth(color_path, depth_path, camera_params, depth
 if __name__ == "__main__":
     # ===== Stereo Example =====
     try:
-        pcd_stereo = generate_point_cloud_from_stereo("left_group.jpg", "right_group.jpg")
+        pcd_stereo = generate_point_cloud_from_stereo("left_1.jpg", "right_1.jpg")  # <-- Corrected filename
+        o3d.io.write_point_cloud("stereo_output.ply", pcd_stereo)
+        print("✅ Saved stereo point cloud to 'stereo_output.ply'")
+        o3d.visualization.draw_geometries([pcd_stereo])
+    except Exception as e:
+        print("Stereo error:", e)
+
+    # ===== Depth Image Example =====
+    camera_params = (
+        880.0, 990.0, 430.0, 540.0,      # fx, fy, cx, cy
+        np.eye(3),                       # R (Identity matrix)
+        np.zeros(3)                      # T (Zero translation)
+    )
+
+    try:
+        pcd_depth = generate_point_cloud_from_depth("color_img.png", "depth_img.png", camera_params)
+        o3d.io.write_point_cloud("depth_output.ply", pcd_depth)
+        print("✅ Saved depth point cloud to 'depth_output.ply'")
+        o3d.visualization.draw_geometries([pcd_depth])
+    except Exception as e:
+        print("Depth error:", e)
+
+    # ===== Stereo Example =====
+    try:
+        pcd_stereo = generate_point_cloud_from_stereo("left_1.jpg", "left_2.jpg")
         o3d.io.write_point_cloud("stereo_output.ply", pcd_stereo)
         print("✅ Saved stereo point cloud to 'stereo_output.ply'")
         o3d.visualization.draw_geometries([pcd_stereo])
