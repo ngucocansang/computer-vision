@@ -109,9 +109,17 @@ if __name__ == "__main__":
     except Exception as e:
         print("Stereo error:", e)
 
-
+    # ===== Depth Image Example =====
     camera_params = (
-        880.0, 990.0, 430.0, 540.0, 
-        np.eye(3),                   
-        np.zeros(3)                
+        880.0, 990.0, 430.0, 540.0,      # fx, fy, cx, cy
+        np.eye(3),                       # R (Identity matrix)
+        np.zeros(3)                      # T (Zero translation)
     )
+
+    try:
+        pcd_depth = generate_point_cloud_from_depth("color_img.png", "depth_img.png", camera_params)
+        o3d.io.write_point_cloud("depth_output.ply", pcd_depth)
+        print("✅ Saved depth point cloud to 'depth_output.ply'")
+        o3d.visualization.draw_geometries([pcd_depth])
+    except Exception as e:
+        print("Depth error:", e)
