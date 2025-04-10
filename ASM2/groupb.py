@@ -20,7 +20,7 @@ def generate_point_cloud_from_stereo(imgL_path, imgR_path, focal_length=800, bas
         P2=32 * 3 * 9 ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=5,
-        speckleWindowSize=50,
+        speckleWindowSize=100,
         speckleRange=1
     )
 
