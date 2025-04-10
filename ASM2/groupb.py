@@ -102,7 +102,7 @@ def generate_point_cloud_from_depth(color_path, depth_path, camera_params, depth
 if __name__ == "__main__":
     # ===== Stereo Example =====
     try:
-        pcd_stereo = generate_point_cloud_from_stereo("left_group.jpg", "right_group.jpg")
+        pcd_stereo = generate_point_cloud_from_stereo("snapshot_left_1.jpg", "snapshot_left_2.jpg")
         o3d.io.write_point_cloud("stereo_output.ply", pcd_stereo)
         print("✅ Saved stereo point cloud to 'stereo_output.ply'")
         o3d.visualization.draw_geometries([pcd_stereo])
