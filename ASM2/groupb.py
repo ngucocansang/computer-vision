@@ -14,10 +14,10 @@ def generate_point_cloud_from_stereo(imgL_path, imgR_path, focal_length=800, bas
 
     stereo = cv2.StereoSGBM_create(
         minDisparity=0,
-        numDisparities=16 * 5,
-        blockSize=5,
-        P1=8 * 3 * 5 ** 2,
-        P2=32 * 3 * 5 ** 2,
+        numDisparities=96,
+        blockSize=7,
+        P1=8 * 3 * 7 ** 2,
+        P2=32 * 3 * 7 ** 2,
         disp12MaxDiff=1,
         uniquenessRatio=5,
         speckleWindowSize=50,
@@ -102,7 +102,7 @@ def generate_point_cloud_from_depth(color_path, depth_path, camera_params, depth
 if __name__ == "__main__":
     # ===== Stereo Example =====
     try:
-        pcd_stereo = generate_point_cloud_from_stereo("snapshot_left_1.jpg", "snapshot_left_2.jpg")
+        pcd_stereo = generate_point_cloud_from_stereo("left_group.jpg", "right_group.jpg")
         o3d.io.write_point_cloud("stereo_output.ply", pcd_stereo)
         print("✅ Saved stereo point cloud to 'stereo_output.ply'")
         o3d.visualization.draw_geometries([pcd_stereo])

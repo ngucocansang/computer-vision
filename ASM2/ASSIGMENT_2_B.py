@@ -1,125 +1,65 @@
-import cv2
-import numpy as np
 import open3d as o3d
-import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import sys
 
+# === CONFIG ===
+COLOR_PATH = "left_group.jpg"  # Replace with your RGB image path
+DEPTH_PATH = "right_group.png"  # Replace with your depth image path (16-bit PNG)
+OUTPUT_PCD = "output.ply" # Output point cloud filename
+DEPTH_SCALE = 1000.0      # 1 meter = 1000 mm (RealSense, Kinect, etc.)
+FX = 615.0                # Adjust based on your camera
+FY = 615.0
+CX = 320.0
+CY = 240.0
 
-def generate_point_cloud_from_stereo(imgL_path, imgR_path, focal_length=800, baseline=0.05):
-    imgL_gray = cv2.imread(imgL_path, cv2.IMREAD_GRAYSCALE)
-    imgR_gray = cv2.imread(imgR_path, cv2.IMREAD_GRAYSCALE)
-    imgL_color = cv2.imread(imgL_path, cv2.IMREAD_COLOR)
+# === LOAD IMAGES ===
+color_raw = cv2.imread(COLOR_PATH)
+depth_raw = cv2.imread(DEPTH_PATH, cv2.IMREAD_UNCHANGED)
 
-    if imgL_gray is None or imgR_gray is None:
-        raise FileNotFoundError("❌ One or both stereo images not found.")
+if color_raw is None or depth_raw is None:
+    sys.exit("❌ Error loading images. Check file paths.")
 
-    stereo = cv2.StereoSGBM_create(
-        minDisparity=0,
-        numDisparities=16 * 5,
-        blockSize=5,
-        P1=8 * 3 * 5 ** 2,
-        P2=32 * 3 * 5 ** 2,
-        disp12MaxDiff=1,
-        uniquenessRatio=5,
-        speckleWindowSize=50,
-        speckleRange=1
-    )
+# Resize for alignment (optional, only if needed)
+if color_raw.shape[:2] != depth_raw.shape[:2]:
+    depth_raw = cv2.resize(depth_raw, (color_raw.shape[1], color_raw.shape[0]))
 
-    disparity = stereo.compute(imgL_gray, imgR_gray).astype(np.float32) / 16.0
-    print("📏 Disparity range:", np.min(disparity), "to", np.max(disparity))
+# Convert BGR to RGB
+color_raw = cv2.cvtColor(color_raw, cv2.COLOR_BGR2RGB)
 
-   
-    plt.figure(figsize=(10, 5))
-    plt.imshow(disparity, cmap='plasma')
-    plt.colorbar(label='Disparity Value')
-    plt.title("Disparity Map")
-    plt.show()
+# === CREATE RGBD IMAGE ===
+rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
+    o3d.geometry.Image(color_raw),
+    o3d.geometry.Image(depth_raw),
+    depth_scale=DEPTH_SCALE,
+    convert_rgb_to_intensity=False
+)
 
-    h, w = imgL_gray.shape[:2]
-    Q = np.float32([
-        [1, 0, 0, -w / 2],
-        [0, -1, 0, h / 2],
-        [0, 0, 0, -focal_length],
-        [0, 0, 1 / baseline, 0]
-    ])
+# === INTRINSIC MATRIX ===
+intrinsic = o3d.camera.PinholeCameraIntrinsic(
+    width=color_raw.shape[1],
+    height=color_raw.shape[0],
+    fx=FX, fy=FY,
+    cx=CX, cy=CY
+)
 
-    points_3D = cv2.reprojectImageTo3D(disparity, Q)
-    colors = cv2.cvtColor(imgL_color, cv2.COLOR_BGR2RGB)
+# === GENERATE POINT CLOUD ===
+pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+    rgbd_image,
+    intrinsic
+)
 
-    mask = (disparity > disparity.min()) & (disparity < np.max(disparity))
-    output_points = points_3D[mask]
-    output_colors = colors[mask]
+# Flip it to match OpenCV coordinate system
+pcd.transform([[1, 0, 0, 0],
+               [0, -1, 0, 0],
+               [0, 0, -1, 0],
+               [0, 0, 0, 1]])
 
-    dists = np.linalg.norm(output_points, axis=1)
-    close_mask = dists < 3.5
-    output_points = output_points[close_mask]
-    output_colors = output_colors[close_mask]
+# === FILTERING & DOWNSAMPLING (optional) ===
+pcd = pcd.voxel_down_sample(voxel_size=0.0025)  # Smaller = higher detail
+pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+pcd = pcd.select_by_index(ind)
 
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(output_points)
-    pcd.colors = o3d.utility.Vector3dVector(output_colors.astype(np.float32) / 255.0)
-
-    return pcd
-
-
-
-def generate_point_cloud_from_depth(color_path, depth_path, camera_params, depth_scale=4000.0):
-    fx, fy, cx, cy, R, T = camera_params
-    color_img = cv2.imread(color_path)
-    depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-
-    if color_img is None or depth_img is None:
-        raise FileNotFoundError("❌ Error loading depth or color image.")
-
-    h, w = depth_img.shape
-    points = []
-    colors = []
-
-    for v in range(h):
-        for u in range(w):
-            z = depth_img[v, u] / depth_scale
-            if z <= 0:
-                continue
-            x = (u - cx) * z / fx
-            y = (v - cy) * z / fy
-            point = np.array([x, y, z])
-            transformed = R @ point + T
-            points.append(transformed)
-            colors.append(color_img[v, u][::-1] / 255.0)
-
-    if not points:
-        raise ValueError("❌ No valid points found in depth data.")
-
-    points = np.array(points)
-    colors = np.array(colors)
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-
-    return pcd
-
-
-# === Main Execution ===
-if __name__ == "__main__":
-    # ===== Stereo Example =====
-    try:
-        pcd_stereo = generate_point_cloud_from_stereo("left_group.jpg", "right_group.jpg")
-        o3d.io.write_point_cloud("stereo_output.ply", pcd_stereo)
-        print("✅ Saved stereo point cloud to 'stereo_output.ply'")
-        o3d.visualization.draw_geometries([pcd_stereo])
-    except Exception as e:
-        print("Stereo error:", e)
-
-    # ===== Depth Image Example =====
-    camera_params = (
-        880.0, 990.0, 430.0, 540.0,      # fx, fy, cx, cy
-        np.eye(3),                       # R (Identity matrix)
-        np.zeros(3)                      # T (Zero translation)
-    )
-
-    try:
-        pcd_depth = generate_point_cloud_from_depth("color_img.png", "depth_img.png", camera_params)
-        o3d.io.write_point_cloud("depth_output.ply", pcd_depth)
-        print("✅ Saved depth point cloud to 'depth_output.ply'")
-        o3d.visualization.draw_geometries([pcd_depth])
-    except Exception as e:
-        print("Depth error:", e)
+# === SAVE & VISUALIZE ===
+o3d.io.write_point_cloud(OUTPUT_PCD, pcd, write_ascii=True)
+o3d.visualization.draw_geometries([pcd], window_name="3D Output", width=800, height=600)
