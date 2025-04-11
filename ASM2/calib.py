@@ -16,8 +16,8 @@ imgpointsL = []     # 2D points từ camera trái
 imgpointsR = []     # 2D points từ camera phải
 
 # Khởi tạo camera
-camL = cv2.VideoCapture(0)
-camR = cv2.VideoCapture(1)
+camL = cv2.VideoCapture(2, cv2.CAP_DSHOW)
+camR = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 
 print("Press 's' to save frame pair, 'r' to run stereo calibration, 'q' to quit.")
 
@@ -97,3 +97,17 @@ while True:
 camL.release()
 camR.release()
 cv2.destroyAllWindows()
+
+# Lưu file .yml
+fs = cv2.FileStorage("stereo_calibration.yml", cv2.FILE_STORAGE_WRITE)
+
+fs.write("CameraMatrixL", mtxL)
+fs.write("DistCoeffsL", distL)
+fs.write("CameraMatrixR", mtxR)
+fs.write("DistCoeffsR", distR)
+fs.write("RotationMatrix", R)
+fs.write("TranslationVector", T)
+fs.write("QMatrix", Q)
+
+fs.release()
+print("✅ Đã lưu file stereo_calibration.yml")

@@ -7,17 +7,17 @@ BASELINE = 10           # in cm
 DISTANCE_THRESHOLD = 40.0  # in cm
 
 # --- Depth from Disparity using MEDIAN for robustness ---
-def depth_from_disparity(disparity_values, focal_length, baseline):
-    valid_disparities = disparity_values[(disparity_values > 0) & (disparity_values < 128)]  # clamp upper bound
-    if len(valid_disparities) == 0:
-        return None
-    median_disp = np.median(valid_disparities)
-    return (focal_length * baseline) / median_disp
+# def depth_from_disparity(disparity_values, focal_length, baseline):
+#     valid_disparities = disparity_values[(disparity_values > 0) & (disparity_values < 128)]  # clamp upper bound
+#     if len(valid_disparities) == 0:
+#         return None
+#     median_disp = np.median(valid_disparities)
+#     return (focal_length * baseline) / median_disp
 
 # --- Use StereoSGBM for better disparity quality ---
-min_disp = 90
+min_disp = 0
 num_disp = 128  # must be divisible by 16
-block_size = 5
+block_size = 7
 stereo = cv2.StereoSGBM_create(
     minDisparity=min_disp,
     numDisparities=num_disp,
@@ -31,6 +31,9 @@ stereo = cv2.StereoSGBM_create(
 left_cam = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 right_cam = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 
+calib = np.load("stereo_calib_data.npz")
+Q = np.load("stereo_calib_data.npz")["Q"]
+
 while True:
     ret_left, frame_left = left_cam.read()
     ret_right, frame_right = right_cam.read()
@@ -41,6 +44,9 @@ while True:
 
     frame_left = cv2.resize(frame_left, (640, 480))
     frame_right = cv2.resize(frame_right, (640, 480))
+
+    height, width = frame_left.shape[:2]
+
 
     # --- Blue Object Detection ---
     hsv = cv2.cvtColor(frame_left, cv2.COLOR_BGR2HSV)
@@ -56,11 +62,23 @@ while True:
 
     contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-    # --- Disparity Map (Raw, Unnormalized) ---
-    gray_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY)
-    gray_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
+    # Load calibration data
+    
+    left_map1, left_map2 = cv2.initUndistortRectifyMap(
+        calib["M1"], calib["D1"], calib["R1"], calib["P1"], (640, 480), cv2.CV_16SC2)
+    right_map1, right_map2 = cv2.initUndistortRectifyMap(
+        calib["M2"], calib["D2"], calib["R2"], calib["P2"], (640, 480), cv2.CV_16SC2)
+    Q = calib["Q"]  # ✅ dùng Q gốc từ stereoRectify
+
+    # Trong vòng lặp:
+    gray_left = cv2.remap(cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY),
+                        left_map1, left_map2, cv2.INTER_LINEAR)
+    gray_right = cv2.remap(cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY),
+                        right_map1, right_map2, cv2.INTER_LINEAR)
 
     raw_disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0  # scale back
+    points_3D = cv2.reprojectImageTo3D(raw_disparity, Q)
+
 
     # --- Optional: Normalized disparity for display ---
     disp_display = cv2.normalize(raw_disparity, None, 0, 255, cv2.NORM_MINMAX)
@@ -73,10 +91,14 @@ while True:
         # --- Mask disparity map inside object region ---
         roi_mask = np.zeros_like(red_mask)
         cv2.drawContours(roi_mask, [largest_contour], -1, 255, -1)
-        disparity_roi = raw_disparity[roi_mask == 255]
+        points_roi = points_3D[roi_mask == 255]
+        z_values = points_roi[:, 2]  # Lấy Z (chiều sâu)
 
-        # --- Improved Distance Estimation ---
-        distance = depth_from_disparity(disparity_roi, FOCAL_LENGTH, BASELINE)
+        valid_z = z_values[(z_values > 0) & (z_values < 1000)]  # lọc giá trị vô lý
+        if len(valid_z) > 0:
+            distance = np.median(valid_z)
+        else:
+            distance = None
 
         if distance is not None:
             distance_text = f"Distance: {distance:.2f} cm"
@@ -103,3 +125,4 @@ while True:
 left_cam.release()
 right_cam.release()
 cv2.destroyAllWindows()
+
