@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 # --- Stereo Camera Calibration Parameters ---
-FOCAL_LENGTH = 480       # in pixels (based on your setup)
+FOCAL_LENGTH =  6745.82       # in pixels (based on your setup)
 BASELINE = 10           # in cm
 DISTANCE_THRESHOLD = 40.0  # in cm
 
@@ -69,6 +69,24 @@ while True:
     right_map1, right_map2 = cv2.initUndistortRectifyMap(
         calib["M2"], calib["D2"], calib["R2"], calib["P2"], (640, 480), cv2.CV_16SC2)
     Q = calib["Q"]  # ✅ dùng Q gốc từ stereoRectify
+
+    # Access individual parameters using the actual keys
+mtxL = calib["mtxL"]
+distL = calib["distL"]
+mtxR = calib["mtxR"]
+distR = calib["distR"]
+R = calib["R"]
+T = calib["T"]
+Q = calib["Q"]
+
+# You’ll need to compute rectification transforms since P1, P2, R1, R2 are missing
+image_size = (640, 480)
+R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(mtxL, distL, mtxR, distR, image_size, R, T, alpha=0)
+
+# Now generate rectification maps
+left_map1, left_map2 = cv2.initUndistortRectifyMap(mtxL, distL, R1, P1, image_size, cv2.CV_16SC2)
+right_map1, right_map2 = cv2.initUndistortRectifyMap(mtxR, distR, R2, P2, image_size, cv2.CV_16SC2)
+
 
     # Trong vòng lặp:
     gray_left = cv2.remap(cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY),
