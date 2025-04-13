@@ -2,145 +2,104 @@ import cv2
 import numpy as np
 
 # --- Stereo Camera Calibration Parameters ---
-FOCAL_LENGTH =  6745.82       # in pixels (based on your setup)
-BASELINE = 10           # in cm
-DISTANCE_THRESHOLD = 40.0  # in cm
+FOCAL_LENGTH = 674.582  # pixels
+BASELINE = 10.0         # cm
+DISTANCE_THRESHOLD = 50.0  # cm
 
-# --- Depth from Disparity using MEDIAN for robustness ---
-# def depth_from_disparity(disparity_values, focal_length, baseline):
-#     valid_disparities = disparity_values[(disparity_values > 0) & (disparity_values < 128)]  # clamp upper bound
-#     if len(valid_disparities) == 0:
-#         return None
-#     median_disp = np.median(valid_disparities)
-#     return (focal_length * baseline) / median_disp
-
-# --- Use StereoSGBM for better disparity quality ---
-min_disp = 0
-num_disp = 128  # must be divisible by 16
-block_size = 7
+# --- StereoSGBM Setup ---
 stereo = cv2.StereoSGBM_create(
-    minDisparity=min_disp,
-    numDisparities=num_disp,
-    blockSize=block_size,
-    P1=8 * 3 * block_size ** 2,
-    P2=32 * 3 * block_size ** 2,
-    mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
+    minDisparity=20,
+    numDisparities=128,  # divisible by 16
+    blockSize=7,
+    P1=8 * 3 * 9 ** 2,
+    P2=32 * 3 * 9 ** 2,
+    disp12MaxDiff=1,
+    uniquenessRatio=5,
+    speckleWindowSize=100,
+    speckleRange=1
 )
 
-# --- Open Cameras ---
+def compute_depth(disparity_values, focal_length, baseline):
+    valid_disp = disparity_values[(disparity_values > 0) & (disparity_values < 256)]
+    if len(valid_disp) < 10:
+        return None
+    median_disp = np.median(valid_disp)
+    if median_disp < 0.1:
+        return None  # tránh chia 0
+    depth_cm = (focal_length * baseline) / median_disp
+    return depth_cm
+
+
+def detect_blue_object(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lower_blue = np.array([100, 150, 50])
+    upper_blue = np.array([140, 255, 255])
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    return mask, contours
+
+# --- Open Stereo Cameras ---
 left_cam = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 right_cam = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 
-calib = np.load("stereo_calib_data.npz")
-Q = np.load("stereo_calib_data.npz")["Q"]
+# Optional: set resolution instead of resizing later
+for cam in [left_cam, right_cam]:
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+if not left_cam.isOpened() or not right_cam.isOpened():
+    print("Cannot open cameras.")
+    exit()
 
 while True:
-    ret_left, frame_left = left_cam.read()
-    ret_right, frame_right = right_cam.read()
+    ret_l, frame_left = left_cam.read()
+    ret_r, frame_right = right_cam.read()
 
-    if not ret_left or not ret_right:
-        print("Camera error")
+    if not ret_l or not ret_r:
+        print("Camera error.")
         break
 
-    frame_left = cv2.resize(frame_left, (640, 480))
-    frame_right = cv2.resize(frame_right, (640, 480))
+    # Disparity Map
+    gray_left = cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY)
+    gray_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
+    disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0
+    print(f"Disparity range: min={np.min(disparity)}, max={np.max(disparity)}")
 
-    height, width = frame_left.shape[:2]
+    disparity_vis = cv2.normalize(disparity, None, 0, 255, cv2.NORM_MINMAX)
+    disparity_vis = np.uint8(disparity_vis)
 
-
-    # --- Blue Object Detection ---
-    hsv = cv2.cvtColor(frame_left, cv2.COLOR_BGR2HSV)
-    lower_red1 = np.array([0, 120, 70])
-    upper_red1 = np.array([10, 255, 255])
-
-    lower_red2 = np.array([170, 120, 70])
-    upper_red2 = np.array([180, 255, 255])
-    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    red_mask = cv2.bitwise_or(mask1, mask2)
-    result = cv2.bitwise_and(frame_left, frame_left, mask=red_mask)
-
-    contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Load calibration data
-    
-    left_map1, left_map2 = cv2.initUndistortRectifyMap(
-        calib["M1"], calib["D1"], calib["R1"], calib["P1"], (640, 480), cv2.CV_16SC2)
-    right_map1, right_map2 = cv2.initUndistortRectifyMap(
-        calib["M2"], calib["D2"], calib["R2"], calib["P2"], (640, 480), cv2.CV_16SC2)
-    Q = calib["Q"]  # ✅ dùng Q gốc từ stereoRectify
-
-    # Access individual parameters using the actual keys
-mtxL = calib["mtxL"]
-distL = calib["distL"]
-mtxR = calib["mtxR"]
-distR = calib["distR"]
-R = calib["R"]
-T = calib["T"]
-Q = calib["Q"]
-
-# You’ll need to compute rectification transforms since P1, P2, R1, R2 are missing
-image_size = (640, 480)
-R1, R2, P1, P2, _, _, _ = cv2.stereoRectify(mtxL, distL, mtxR, distR, image_size, R, T, alpha=0)
-
-# Now generate rectification maps
-left_map1, left_map2 = cv2.initUndistortRectifyMap(mtxL, distL, R1, P1, image_size, cv2.CV_16SC2)
-right_map1, right_map2 = cv2.initUndistortRectifyMap(mtxR, distR, R2, P2, image_size, cv2.CV_16SC2)
-
-
-    # Trong vòng lặp:
-    gray_left = cv2.remap(cv2.cvtColor(frame_left, cv2.COLOR_BGR2GRAY),
-                        left_map1, left_map2, cv2.INTER_LINEAR)
-    gray_right = cv2.remap(cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY),
-                        right_map1, right_map2, cv2.INTER_LINEAR)
-
-    raw_disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0  # scale back
-    points_3D = cv2.reprojectImageTo3D(raw_disparity, Q)
-
-
-    # --- Optional: Normalized disparity for display ---
-    disp_display = cv2.normalize(raw_disparity, None, 0, 255, cv2.NORM_MINMAX)
-    disp_display = np.uint8(disp_display)
+    # Detect Blue Object
+    mask, contours = detect_blue_object(frame_left)
+    result = cv2.bitwise_and(frame_left, frame_left, mask=mask)
 
     if contours:
-        largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) > 500:  # ignore noise
+            x, y, w, h = cv2.boundingRect(largest)
+            roi_mask = np.zeros(disparity.shape, dtype=np.uint8)
+            cv2.drawContours(roi_mask, [largest], -1, 255, -1)
 
-        # --- Mask disparity map inside object region ---
-        roi_mask = np.zeros_like(red_mask)
-        cv2.drawContours(roi_mask, [largest_contour], -1, 255, -1)
-        points_roi = points_3D[roi_mask == 255]
-        z_values = points_roi[:, 2]  # Lấy Z (chiều sâu)
+            disp_values = disparity[roi_mask == 255]
+            distance = compute_depth(disp_values, FOCAL_LENGTH, BASELINE)
 
-        valid_z = z_values[(z_values > 0) & (z_values < 1000)]  # lọc giá trị vô lý
-        if len(valid_z) > 0:
-            distance = np.median(valid_z)
-        else:
-            distance = None
+            # Display Info
+            distance_text = f"Distance: {distance:.2f} cm" if distance else "Distance: N/A"
+            cv2.rectangle(result, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            cv2.putText(result, distance_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (255, 255, 0), 2)
+            if distance and distance < DISTANCE_THRESHOLD:
+                cv2.putText(result, "WARNING: OBJECT TOO CLOSE!", (10, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
 
-        if distance is not None:
-            distance_text = f"Distance: {distance:.2f} cm"
-        else:
-            distance_text = "Distance: N/A"
-
-        # --- Draw overlays ---
-        cv2.rectangle(result, (x, y), (x + w, y + h), (255, 0, 0), 2)
-        cv2.putText(result, distance_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                    (255, 255, 0), 2)
-
-        if distance is not None and distance < DISTANCE_THRESHOLD:
-            cv2.putText(result, "WARNING: OBJECT TOO CLOSE!", (10, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
-
-    # --- Display Windows ---
-    cv2.imshow("Blue Detection (Left)", result)
+    # Show Windows
+    cv2.imshow("Blue Detection", result)
+    cv2.imshow("Disparity", disparity_vis)
     cv2.imshow("Right Camera", frame_right)
-    cv2.imshow("Disparity Map", disp_display)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
+# --- Cleanup ---
 left_cam.release()
 right_cam.release()
 cv2.destroyAllWindows()
-

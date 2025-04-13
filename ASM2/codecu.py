@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 
 # --- Stereo Camera Calibration Parameters ---
-FOCAL_LENGTH =  6745.82       # in pixels (based on your setup)
-BASELINE = 6.0           # in cm
-DISTANCE_THRESHOLD = 50.0  # in cm
+FOCAL_LENGTH =  105       # in pixels (based on your setup)
+BASELINE = 10.0           # in cm
+DISTANCE_THRESHOLD = 44.0  # in cm
 
 # --- Depth Calculation ---
 def depth_from_disparity(disparity_values, focal_length, baseline):
@@ -17,8 +17,8 @@ def depth_from_disparity(disparity_values, focal_length, baseline):
 # --- StereoSGBM Matcher with improved parameters ---
 stereo = cv2.StereoSGBM_create(
     minDisparity=20,
-    numDisparities=64,  # must be divisible by 16, changed from 50 to 64
-    blockSize=9,
+    numDisparities=128,  # must be divisible by 16, changed from 50 to 64
+    blockSize=7,
     P1=8 * 3 * 9 ** 2,
     P2=32 * 3 * 9 ** 2,
     disp12MaxDiff=1,
@@ -61,8 +61,11 @@ while True:
     gray_right = cv2.cvtColor(frame_right, cv2.COLOR_BGR2GRAY)
 
     disparity = stereo.compute(gray_left, gray_right).astype(np.float32) / 16.0  # Proper scaling
-    disparity_vis = cv2.normalize(disparity, None, 0, 255, cv2.NORM_MINMAX)
-    disparity_vis = np.uint8(disparity_vis)
+    disparity_normalized = cv2.normalize(disparity, None, 0, 255, cv2.NORM_MINMAX)
+    disparity_normalized = np.uint8(disparity_normalized)
+    disparity_color = cv2.applyColorMap(disparity_normalized, cv2.COLORMAP_JET)
+
+
 
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
@@ -82,7 +85,7 @@ while True:
         # Draw bounding box and distance
         cv2.rectangle(result, (x, y), (x + w, y + h), (255, 0, 0), 2)
         cv2.putText(result, distance_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                    (255, 255, 0), 2)
+                     (255, 255, 0), 2)
 
         # Warning if object too close
         if distance is not None and distance < DISTANCE_THRESHOLD:
@@ -91,7 +94,7 @@ while True:
 
     # --- Display ---
     cv2.imshow("Blue Detection", result)
-    cv2.imshow("Disparity Map", disparity_vis)
+    cv2.imshow("Disparity Map (Color)", disparity_color)
     cv2.imshow("Right Camera", frame_right)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
