@@ -6,7 +6,8 @@ def detect_pupil(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     edges = cv2.Canny(blurred, 50, 150)
-    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, 1.2, 20, param1=50, param2=30, minRadius=5, maxRadius=30)
+    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, 1.2, 20,
+                                param1=50, param2=30, minRadius=5, maxRadius=30)
 
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
@@ -14,26 +15,23 @@ def detect_pupil(frame):
     return None
 
 # Kalman Filter setup
-dt = 1  # time step (can be tuned)
+dt = 1
 F = np.array([[1, 0, dt, 0],
               [0, 1, 0, dt],
-              [0, 0, 1,  0],
-              [0, 0, 0,  1]])
+              [0, 0, 1, 0 ],
+              [0, 0, 0, 1 ]])
 
 H = np.array([[1, 0, 0, 0],
               [0, 1, 0, 0]])
 
-x = np.zeros((4, 1))           # Initial state
-P = np.eye(4) * 1000           # Initial covariance
-Q = np.eye(4) * 0.1            # Process noise
-R = np.array([[8, 0], [0, 8]]) # Measurement noise (tune this based on your earlier output)
+x = np.zeros((4, 1))
+P = np.eye(4) * 1000
+Q = np.eye(4) * 0.1
+R = np.array([[10, 0], [0, 10]])  # Assumed measurement noise covariance
 
-# For tracking accuracy
-errors = []
-
-# Open webcam
 cap = cv2.VideoCapture(0)
 prev_time = time.time()
+errors = []  # Store tracking errors
 
 while True:
     ret, frame = cap.read()
@@ -56,24 +54,25 @@ while True:
         x = x + K @ y
         P = (np.eye(4) - K @ H) @ P
 
-        # Draw detection and compute error
-        cv2.circle(frame, (int(z[0]), int(z[1])), 8, (0, 255, 0), 2)  # Green = detection
-        prediction = (int(x[0]), int(x[1]))
-        error = np.linalg.norm(z[:2] - x[:2])
+        # Draw measurement
+        cv2.circle(frame, (int(z[0]), int(z[1])), 6, (0, 255, 0), 2)  # Green: measured
+
+        # Calculate error
+        error = np.linalg.norm([x[0, 0] - z[0, 0], x[1, 0] - z[1, 0]])
         errors.append(error)
 
     # Draw prediction
-    prediction = (int(x[0]), int(x[1]))
-    cv2.circle(frame, prediction, 5, (0, 0, 255), -1)  # Red = Kalman prediction
+    predicted_pos = (int(x[0]), int(x[1]))
+    cv2.circle(frame, predicted_pos, 6, (0, 0, 255), 2)  # Red: predicted
 
-    # Show FPS
+    # FPS display
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time)
     prev_time = curr_time
     cv2.putText(frame, f'FPS: {fps:.2f}', (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
-    # Display
+    # Show frame
     cv2.imshow('Kalman Filter - Pupil Tracking', frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
@@ -81,17 +80,16 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 
-# Accuracy Report
+# Accuracy results
 if errors:
-    avg_error = np.mean(errors)
-    print(f"\nAverage Tracking Error: {avg_error:.2f} pixels")
+    avg_error = sum(errors) / len(errors)
+    print(f"Average Tracking Error: {avg_error:.2f} pixels")
 
-    # Comment based on error
     if avg_error < 5:
         print("🔍 Excellent tracking accuracy. The Kalman filter tracks the pupil very well.")
     elif avg_error < 10:
-        print("✅ Good tracking accuracy. Small fluctuations detected, but overall smooth.")
+        print("👍 Good tracking accuracy. The filter handles noise effectively.")
     else:
-        print("⚠️ Tracking is unstable. Consider tuning the filter or improving detection.")
+        print("⚠️ Acceptable tracking, but further tuning might be needed (e.g., better detection or noise adjustment).")
 else:
-    print("No detections were made. Check lighting/camera or adjust HoughCircles params.")
+    print("No measurements were detected. Tracking accuracy could not be estimated.")
